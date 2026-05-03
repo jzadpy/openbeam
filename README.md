@@ -1,29 +1,4 @@
-# OpenBeam
-
-Proyecto Android Studio para:
-- tocar dos teléfonos con NFC,
-- leer un token con HCE,
-- arrancar Nearby Connections sin internet,
-- mandar fotos por transferencia local,
-- activar el modo desde un tile del Quick Settings.
-
-## Árbol
-Ver el árbol en la respuesta del chat.
-
-## Compilar APK
-1. Abre Android Studio.
-2. Elige **Open** y abre esta carpeta.
-3. Espera a que Gradle termine de sincronizar.
-4. Conecta un teléfono con depuración USB.
-5. Ve a **Build > Build Bundle(s) / APK(s) > Build APK(s)**.
-6. Android Studio te enseña la ruta del APK generado.
-
-## Flujo
-- Botón **Modo enviar**: activa Nearby como emisor.
-- Botón **Modo recibir**: activa NFC reader mode y luego Nearby.
-- **Elegir foto**: copia la imagen al caché.
-- **Mandar foto**: manda metadata + archivo.
-- **Tile**: activa o apaga el modo listo desde QS.
-
-## Nota
-Nearby Connections no usa internet; usa tecnologías locales como Bluetooth y Wi-Fi para el enlace cercano.
+OpenBeamOpenBeam is a low-latency, Peer-to-Peer (P2P) file transfer solution for Android that implements a hybrid communication stack. It leverages Near-Field Communication (NFC) for cryptographic-like handshaking and Wi-Fi Direct / Bluetooth LE for high-throughput data payloads. Technical ArchitectureUnlike legacy implementations, OpenBeam operates as a high-level abstraction layer over the Android Sharing Pipeline.1. The Handshake Protocol (NFC NDEF)The app utilizes the NFC Foreground Dispatch System to intercept and parse NDEF (NFC Data Exchange Format) records. When two devices achieve physical proximity, a proprietary token is exchanged to negotiate the transport parameters, eliminating the discovery latency typical of standard Bluetooth/Wi-Fi scanning.2. Transport Layer HandoffOnce the handshake is validated, the application executes a Protocol Handoff. The payload is routed through the Quick Share (Nearby Connections API) transport layer, utilizing:TCP/UDP Sockets over Wi-Fi Direct for massive binary objects.RFCOMM/L2CAP channels for smaller metadata bursts.3. Reactive UI & Data BindingThe frontend architecture follows the MVVM pattern, utilizing Android Data Binding to ensure a decoupled and reactive state management. The ActivityMainBinding handles real-time updates of the transfer progress without blocking the main UI thread.   Specifications & EnvironmentBuild System: Gradle 8.7.  Android Gradle Plugin (AGP): 8.5.2.  Compiler: D8/R8 for optimized bytecode shrinking.Language: Java/Kotlin Hybrid.  Build Machine: Optimized for high-concurrency compilation (Tested on Dell Latitude 5420). DeploymentYour .gitignore is already optimized to exclude persistent build artifacts like *.iml, .gradle/, and local environment configurations. To clone and initialize the development environment:  Bashgit clone https://github.com/jzadpy/OpenBeam.git
+cd OpenBeam
+./gradlew assembleDebug
+ Project Manifestapp.jzad.openbeam: Core namespace housing the NFC Intent Filters and Service logic.  res/layout: Declarative XML layouts bound via the Data Binding library.  .idea: IDE-specific metadata for project consistency across Android Studio instances.  
