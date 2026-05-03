@@ -1,4 +1,55 @@
-OpenBeamOpenBeam is a low-latency, Peer-to-Peer (P2P) file transfer solution for Android that implements a hybrid communication stack. It leverages Near-Field Communication (NFC) for cryptographic-like handshaking and Wi-Fi Direct / Bluetooth LE for high-throughput data payloads. Technical ArchitectureUnlike legacy implementations, OpenBeam operates as a high-level abstraction layer over the Android Sharing Pipeline.1. The Handshake Protocol (NFC NDEF)The app utilizes the NFC Foreground Dispatch System to intercept and parse NDEF (NFC Data Exchange Format) records. When two devices achieve physical proximity, a proprietary token is exchanged to negotiate the transport parameters, eliminating the discovery latency typical of standard Bluetooth/Wi-Fi scanning.2. Transport Layer HandoffOnce the handshake is validated, the application executes a Protocol Handoff. The payload is routed through the Quick Share (Nearby Connections API) transport layer, utilizing:TCP/UDP Sockets over Wi-Fi Direct for massive binary objects.RFCOMM/L2CAP channels for smaller metadata bursts.3. Reactive UI & Data BindingThe frontend architecture follows the MVVM pattern, utilizing Android Data Binding to ensure a decoupled and reactive state management. The ActivityMainBinding handles real-time updates of the transfer progress without blocking the main UI thread.   Specifications & EnvironmentBuild System: Gradle 8.7.  Android Gradle Plugin (AGP): 8.5.2.  Compiler: D8/R8 for optimized bytecode shrinking.Language: Java/Kotlin Hybrid.  Build Machine: Optimized for high-concurrency compilation (Tested on Dell Latitude 5420). DeploymentYour .gitignore is already optimized to exclude persistent build artifacts like *.iml, .gradle/, and local environment configurations. To clone and initialize the development environment:  Bashgit clone https://github.com/jzadpy/OpenBeam.git
+# OpenBeam
+
+OpenBeam is a modern open source P2P file transfer app for Android. Tap two phones together, NFC handles the handshake automatically, and the actual transfer runs over Wi-Fi Direct or Bluetooth LE at real speeds.
+
+Think of it as what Android Beam should have been before Google killed it.
+
+## How it works
+
+**1. NFC Handshake**
+
+When two devices get close, the Foreground Dispatch system intercepts the NDEF records and exchanges a token to negotiate transport parameters. This skips the discovery delay you normally get with Bluetooth and Wi-Fi scanning.
+
+**2. Data Transfer**
+
+Once the handshake is done, the payload gets routed through Quick Share (Nearby Connections API) using the best protocol for the job:
+
+| Payload type | Protocol |
+|---|---|
+| Large files | TCP/UDP over Wi-Fi Direct |
+| Small metadata bursts | RFCOMM/L2CAP (Bluetooth) |
+
+**3. UI**
+
+The interface follows MVVM with Android Data Binding. `ActivityMainBinding` handles real-time progress updates without touching the main thread.
+
+## Stack
+
+| | |
+|---|---|
+| Language | Java / Kotlin |
+| Build System | Gradle 8.7 |
+| AGP | 8.5.2 |
+| Compiler | D8/R8 |
+| UI | MVVM + Data Binding |
+
+## Getting started
+
+```bash
+git clone https://github.com/jzadpy/OpenBeam.git
 cd OpenBeam
 ./gradlew assembleDebug
- Project Manifestapp.jzad.openbeam: Core namespace housing the NFC Intent Filters and Service logic.  res/layout: Declarative XML layouts bound via the Data Binding library.  .idea: IDE-specific metadata for project consistency across Android Studio instances.  
+```
+
+You'll need two physical NFC-enabled devices to test transfers. Emulators won't cut it here.
+
+## Project structure
+
+```
+app/jzad.openbeam/    # core logic, NFC Intent Filters and services
+res/layout/           # XML layouts with Data Binding
+```
+
+## Contributing
+
+Open an issue or send a PR, contributions are welcome.
