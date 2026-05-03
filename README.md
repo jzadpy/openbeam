@@ -43,13 +43,9 @@ cd OpenBeam
 
 You'll need two physical NFC-enabled devices to test transfers. Emulators won't cut it here.
 
-## Project structure
-
-```
-app/jzad.openbeam/    # core logic, NFC Intent Filters and services
-res/layout/           # XML layouts with Data Binding
-```
 
 ## Contributing
 
 Open an issue or send a PR, contributions are welcome.
+
+made by jzadpy for basically everyone!
