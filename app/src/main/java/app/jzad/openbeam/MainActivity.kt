@@ -1,14 +1,23 @@
 package app.jzad.openbeam
 
 import android.Manifest
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
-import android.os.Build
-import android.os.Bundle
+import android.os.*
+import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.animation.OvershootInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -20,6 +29,7 @@ import app.jzad.openbeam.nearby.NearbyTransferManager
 import app.jzad.openbeam.storage.BeamFileStore
 import app.jzad.openbeam.storage.PickedMedia
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -42,7 +52,6 @@ class MainActivity : AppCompatActivity() {
             stopEverything()
             return@registerForActivityResult
         }
-
         processPickedUri(uri)
     }
 
@@ -56,24 +65,28 @@ class MainActivity : AppCompatActivity() {
         val token = OpenBeamPrefs.getOrCreateSessionToken(this)
         binding.tokenText.text = getString(R.string.token_nfc_placeholder, token)
 
+        setupNearby()
+        setupButtons()
+
+        handleLaunchIntent(intent)
+        updateStatusForMode()
+        requestNeededPermissionsIfMissing()
+    }
+
+    private fun setupNearby() {
         nearby = NearbyTransferManager(
             context = this,
             status = ::updateStatus,
-            onConnected = { endpoint ->
+            onConnected = { deviceName ->
                 runOnUiThread {
                     isNearbyConnected = true
-                    Toast.makeText(this, getString(R.string.connected_with, endpoint), Toast.LENGTH_SHORT).show()
+                    playConnectHaptic()
+                    showPairingAnimation()
+                    updateStatus(getString(R.string.connected_with, deviceName))
                     
-                    // Auto-send if in sender mode and media is ready
-                    if (currentMode == NearbyTransferManager.Mode.SENDER) {
-                        val picked = selectedMedia
-                        if (picked != null) {
-                            binding.transferProgress.apply {
-                                visibility = View.VISIBLE
-                                isIndeterminate = true
-                            }
-                            nearby.sendMedia(picked)
-                        }
+                    val picked = selectedMedia
+                    if (picked != null && currentMode == NearbyTransferManager.Mode.SENDER) {
+                        performAutoSend(picked)
                     }
                 }
             },
@@ -94,15 +107,87 @@ class MainActivity : AppCompatActivity() {
             onReceived = { fileName ->
                 runOnUiThread {
                     binding.transferProgress.visibility = View.GONE
+                    playFinishHaptic()
                     Toast.makeText(this, getString(R.string.file_saved, fileName), Toast.LENGTH_LONG).show()
                 }
-            },
+            }
         )
+    }
 
+    private fun showPairingAnimation() {
+        binding.pairingOverlay.visibility = View.VISIBLE
+        
+        // Apply blur effect to background on Android 12+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            binding.mainScroll.setRenderEffect(
+                RenderEffect.createBlurEffect(15f, 15f, Shader.TileMode.CLAMP)
+            )
+        }
+        
+        val scaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 0.4f, 1.1f)
+        val scaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 0.4f, 1.1f)
+        val alpha = PropertyValuesHolder.ofFloat(View.ALPHA, 0f, 1f)
+
+        val circleAnim = ObjectAnimator.ofPropertyValuesHolder(binding.pairingCircle, scaleX, scaleY, alpha).apply {
+            duration = 700
+            interpolator = OvershootInterpolator()
+        }
+
+        circleAnim.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                lifecycleScope.launch {
+                    delay(1500)
+                    hidePairingAnimation()
+                }
+            }
+        })
+
+        circleAnim.start()
+    }
+
+    private fun hidePairingAnimation() {
+        ObjectAnimator.ofFloat(binding.pairingOverlay, View.ALPHA, 1f, 0f).apply {
+            duration = 400
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    binding.pairingOverlay.visibility = View.GONE
+                    binding.pairingOverlay.alpha = 1f
+                    binding.pairingCircle.alpha = 0f
+                    
+                    // Remove blur effect
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        binding.mainScroll.setRenderEffect(null)
+                    }
+                }
+            })
+            start()
+        }
+    }
+
+    private fun playConnectHaptic() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            binding.root.performHapticFeedback(HapticFeedbackConstants.GESTURE_START)
+        } else {
+            @Suppress("DEPRECATION")
+            val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+
+    private fun playFinishHaptic() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            binding.root.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        } else {
+            @Suppress("DEPRECATION")
+            val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+            vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
+    }
+
+    private fun setupButtons() {
         binding.senderButton.setOnClickListener {
             ensureNearbyPermissionsAndThen {
                 currentMode = NearbyTransferManager.Mode.SENDER
-                // Step 1: Pick file
                 pickMedia.launch("*/*")
                 updateStatus(getString(R.string.status_sender_active))
             }
@@ -122,10 +207,14 @@ class MainActivity : AppCompatActivity() {
         binding.stopButton.setOnClickListener {
             stopEverything()
         }
+    }
 
-        handleLaunchIntent(intent)
-        updateStatusForMode()
-        requestNeededPermissionsIfMissing()
+    private fun performAutoSend(media: PickedMedia) {
+        binding.transferProgress.apply {
+            visibility = View.VISIBLE
+            isIndeterminate = true
+        }
+        nearby.sendMedia(media)
     }
 
     override fun onResume() {
@@ -162,7 +251,7 @@ class MainActivity : AppCompatActivity() {
             }
         } else if (intent.action == Intent.ACTION_SEND) {
             val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
             } else {
                 @Suppress("DEPRECATION")
                 intent.getParcelableExtra(Intent.EXTRA_STREAM)
@@ -177,7 +266,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun processPickedUri(uri: android.net.Uri) {
+    private fun processPickedUri(uri: Uri) {
         lifecycleScope.launch {
             val picked = withContext(Dispatchers.IO) {
                 BeamFileStore.copyUriToCache(this@MainActivity, uri)
@@ -219,39 +308,55 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val isoDep = IsoDep.get(tag)
             if (isoDep == null) {
-                withContext(Dispatchers.Main) { log(getString(R.string.status_nfc_error)) }
+                withContext(Dispatchers.Main) { 
+                    log(getString(R.string.status_nfc_error))
+                    enableNfcReader()
+                }
                 return@launch
             }
 
-            runCatching {
-                isoDep.connect()
-                isoDep.timeout = 5000
-                val selectApdu = hexToBytes("00A4040008F001020304050607")
-                val getTokenApdu = hexToBytes("80CA000000")
+            var success = false
+            var retries = 3
+            
+            while (!success && retries > 0) {
+                runCatching {
+                    isoDep.connect()
+                    isoDep.timeout = 10000 
+                    
+                    val selectApdu = hexToBytes("00A4040008F001020304050607")
+                    val getTokenApdu = hexToBytes("80CA000000")
 
-                withContext(Dispatchers.Main) { log(getString(R.string.status_nfc_reading)) }
-                val selectResponse = isoDep.transceive(selectApdu)
-                if (!isSuccess(selectResponse)) {
-                    return@runCatching
-                }
+                    withContext(Dispatchers.Main) { log(getString(R.string.status_nfc_reading)) }
+                    val selectResponse = isoDep.transceive(selectApdu)
+                    
+                    if (!isSuccess(selectResponse)) {
+                        throw Exception("Selection failed")
+                    }
 
-                withContext(Dispatchers.Main) { log(getString(R.string.status_nfc_token)) }
-                val tokenResponse = isoDep.transceive(getTokenApdu)
-                val token = parseResponseText(tokenResponse)
+                    withContext(Dispatchers.Main) { log(getString(R.string.status_nfc_token)) }
+                    val tokenResponse = isoDep.transceive(getTokenApdu)
+                    val token = parseResponseText(tokenResponse)
 
-                withContext(Dispatchers.Main) {
-                    binding.tokenText.text = getString(R.string.token_nfc_placeholder, token)
-                    log(getString(R.string.status_nfc_success, token))
-                    nearby.beginDiscoveryAfterNfc()
+                    withContext(Dispatchers.Main) {
+                        binding.tokenText.text = getString(R.string.token_nfc_placeholder, token)
+                        log(getString(R.string.status_nfc_success, token))
+                        nearby.beginDiscoveryAfterNfc()
+                    }
+                    success = true
+                }.onFailure { e ->
+                    retries--
+                    if (retries > 0) {
+                        delay(300)
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            val msg = e.message ?: getString(R.string.idle)
+                            log(getString(R.string.error_nfc_msg, msg))
+                            Toast.makeText(this@MainActivity, getString(R.string.status_nfc_error) + ": $msg", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }.also {
+                    runCatching { isoDep.close() }
                 }
-            }.onFailure { e ->
-                withContext(Dispatchers.Main) {
-                    val msg = e.message ?: getString(R.string.idle)
-                    log(getString(R.string.error_nfc_msg, msg))
-                    Toast.makeText(this@MainActivity, getString(R.string.status_nfc_error) + ": $msg", Toast.LENGTH_SHORT).show()
-                }
-            }.also {
-                runCatching { isoDep.close() }
             }
         }
     }
@@ -317,12 +422,27 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_PERMS) return
 
-        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-            pendingAction?.invoke()
-            pendingAction = null
-            log(getString(R.string.status_perm_ready))
-        } else {
-            log(getString(R.string.status_perm_missing))
+        if (grantResults.isNotEmpty()) {
+            val isLocationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            
+            val isNearbyWifiGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
+            } else true
+            
+            val isBluetoothGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+            } else true
+
+            if (isLocationGranted && isNearbyWifiGranted && isBluetoothGranted) {
+                pendingAction?.invoke()
+                pendingAction = null
+                log(getString(R.string.status_perm_ready))
+            } else {
+                log(getString(R.string.status_perm_missing))
+            }
         }
     }
 
@@ -340,13 +460,10 @@ class MainActivity : AppCompatActivity() {
             list += Manifest.permission.BLUETOOTH_CONNECT
             list += Manifest.permission.BLUETOOTH_ADVERTISE
             list += Manifest.permission.ACCESS_FINE_LOCATION
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            list += Manifest.permission.ACCESS_FINE_LOCATION
         } else {
-            list += Manifest.permission.ACCESS_COARSE_LOCATION
+            list += Manifest.permission.ACCESS_FINE_LOCATION
         }
         
-        // Include storage for Pre-Q devices
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             list += Manifest.permission.WRITE_EXTERNAL_STORAGE
         }

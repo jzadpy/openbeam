@@ -30,7 +30,7 @@ class NearbyTransferManager(
 ) {
     private val appContext = context.applicationContext
     private val connectionsClient: ConnectionsClient = Nearby.getConnectionsClient(appContext)
-    private val strategy = Strategy.P2P_POINT_TO_POINT
+    private val strategy = Strategy.P2P_STAR
 
     private var mode: Mode = Mode.IDLE
     private var connectedEndpointId: String? = null
@@ -48,7 +48,7 @@ class NearbyTransferManager(
         override fun onConnectionResult(endpointId: String, result: com.google.android.gms.nearby.connection.ConnectionResolution) {
             if (result.status.isSuccess) {
                 connectedEndpointId = endpointId
-                onConnected(endpointId)
+                onConnected(result.status.statusMessage ?: endpointId)
                 status(appContext.getString(R.string.nearby_connected))
             } else {
                 status(appContext.getString(R.string.nearby_connection_failed, result.status.statusCode))
@@ -74,7 +74,9 @@ class NearbyTransferManager(
                 localName(),
                 endpointId,
                 connectionLifecycleCallback
-            )
+            ).addOnFailureListener {
+                discoveredOnce = false
+            }
         }
 
         override fun onEndpointLost(endpointId: String) {
@@ -102,6 +104,7 @@ class NearbyTransferManager(
                         status(appContext.getString(R.string.nearby_meta_received, meta.fileName))
                     } else {
                         status(appContext.getString(R.string.nearby_text_received, text))
+                        onReceived(text)
                     }
                 }
 
@@ -176,6 +179,7 @@ class NearbyTransferManager(
     fun beginDiscoveryAfterNfc() {
         if (mode != Mode.RECEIVER) return
         status(appContext.getString(R.string.nearby_searching))
+        
         connectionsClient.startDiscovery(
             SERVICE_ID,
             endpointDiscoveryCallback,

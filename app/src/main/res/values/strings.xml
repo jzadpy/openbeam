@@ -16,6 +16,7 @@
     <string name="error_copying_photo">Error al procesar el archivo</string>
     <string name="hce_service_description">OpenBeam NFC pairing card emulation</string>
     <string name="hce_aid_group_description">OpenBeam pairing AID</string>
+    <string name="ndef_description">NDEF Tag Emulation</string>
 
     <string name="status_ready">Listo para empezar</string>
     <string name="status_sender_active">Modo enviar activo</string>
